@@ -8,7 +8,7 @@
    ========================================================================== */
 'use strict';
 
-const CACHE_NAME = 'lernkarten-v1';
+const CACHE_NAME = 'lernkarten-v2';
 
 // Relative Pfade, damit es auch im Unterordner von GitHub Pages funktioniert.
 const DATEIEN = [
