@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <!-- viewport-fit=cover: Inhalt darf bis unter Notch und Home-Indikator reichen (Abstände regelt style.css) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lernkarten</title>
+  <meta name="description" content="Karteikarten mit Spaced Repetition – offline, ohne Konto.">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="color-scheme" content="dark">
+
+  <!-- iOS: als Vollbild-App vom Home-Bildschirm starten -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Lernkarten">
+  <meta name="format-detection" content="telephone=no">
+
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Hier rendert app.js die jeweilige Ansicht -->
+  <main id="app"></main>
+
+  <nav id="tabbar" aria-label="Hauptnavigation">
+    <button data-tab="home">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1z"/></svg>
+      <span>Start</span>
+    </button>
+    <button data-tab="cards">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M7 3h12a2 2 0 0 1 2 2v10"/></svg>
+      <span>Karten</span>
+    </button>
+    <button data-tab="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+      <span>Einstellungen</span>
+    </button>
+  </nav>
+
+  <div id="dialog" hidden></div>
+  <div id="toast" role="status" hidden></div>
+
+  <!-- Unsichtbare Dateiauswahl für Kartenimport und Backup -->
+  <input type="file" id="file-cards" accept=".json,application/json,text/json,text/plain" hidden>
+  <input type="file" id="file-backup" accept=".json,application/json,text/json,text/plain" hidden>
+
+  <noscript>Diese App benötigt JavaScript.</noscript>
+  <script src="app.js"></script>
+</body>
+</html>
