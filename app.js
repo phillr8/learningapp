@@ -115,13 +115,17 @@ function defaultState() {
       }
     ],
     cards: [],
-    stats: { days: {} }
+    // days: Antworten je Tag, grades: je Tag [Nochmal, Schwer, Gut, Einfach]
+    stats: { days: {}, grades: {} }
   };
 }
 
-/** Lernstand einer frisch angelegten Karte. `due: null` bedeutet "neu". */
+/**
+ * Lernstand einer frisch angelegten Karte. `due: null` bedeutet "neu".
+ * reviews = alle Bewertungen, lapses = davon „Nochmal“ (Basis der Statistik).
+ */
 function newLearnState() {
-  return { ef: 2.5, interval: 0, reps: 0, lapses: 0, due: null, lastReview: null };
+  return { ef: 2.5, interval: 0, reps: 0, lapses: 0, due: null, lastReview: null, reviews: 0 };
 }
 
 function makeCard(subjectId, topic, question, answer) {
@@ -181,7 +185,7 @@ function maxIntervalForExam(daysLeft) {
  * @param {string} rating    'again' | 'hard' | 'good' | 'easy'
  * @param {string} today     heutiges Datum "JJJJ-MM-TT"
  * @param {number|null} daysLeft  Tage bis zur Klausur des Moduls (null = keine)
- * @returns {object} neue Werte für ef, interval, reps, lapses, due, lastReview
+ * @returns {object} neue Werte für ef, interval, reps, lapses, due, lastReview, reviews
  *
  * Regeln:
  *   Nochmal – Karte zurück auf Anfang, heute erneut fällig, Leichtigkeit −0,2
@@ -219,7 +223,8 @@ function schedule(card, rating, today, daysLeft) {
 
   return {
     ef: ef, interval: interval, reps: reps, lapses: lapses,
-    due: addDays(today, interval), lastReview: today
+    due: addDays(today, interval), lastReview: today,
+    reviews: (Number.isFinite(card.reviews) && card.reviews > 0 ? Math.round(card.reviews) : 0) + 1
   };
 }
 
@@ -296,6 +301,129 @@ function streak(days, today) {
   let n = 0;
   while (days[tag] > 0) { n++; tag = addDays(tag, -1); }
   return n;
+}
+
+/* ---------- Statistik ------------------------------------------------------ */
+
+/** Eine Bewertung in der Tagesstatistik vermerken. */
+function recordReview(stats, today, rating) {
+  stats.days[today] = (stats.days[today] || 0) + 1;
+  if (!stats.grades) stats.grades = {};
+  const g = stats.grades[today] || [0, 0, 0, 0];
+  g[BEWERTUNGEN.indexOf(rating)] += 1;
+  stats.grades[today] = g;
+}
+
+/**
+ * Antworten der letzten n Tage (ältester Tag zuerst).
+ * again = „Nochmal“, known = Schwer/Gut/Einfach, other = Antworten aus der
+ * Zeit vor der Aufschlüsselung.
+ */
+function activity(stats, today, n) {
+  const out = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const tag = addDays(today, -i);
+    const g = (stats.grades && stats.grades[tag]) || [0, 0, 0, 0];
+    const bewertet = g[0] + g[1] + g[2] + g[3];
+    const total = Math.max(stats.days[tag] || 0, bewertet);
+    out.push({ date: tag, total: total, again: g[0], known: g[1] + g[2] + g[3], other: total - bewertet });
+  }
+  return out;
+}
+
+/** Trefferquote der letzten n Tage in Prozent (null, wenn es keine Daten gibt). */
+function hitRate(stats, today, n) {
+  let again = 0, known = 0;
+  activity(stats, today, n).forEach(function (d) { again += d.again; known += d.known; });
+  return again + known ? Math.round(known / (again + known) * 100) : null;
+}
+
+/**
+ * Karten nach Lernstand zählen:
+ * fresh = neu, building = Abstand unter 3 Tagen, solid = 3–20 Tage, safe = ab 21 Tagen.
+ */
+function statusCounts(cards) {
+  const r = { total: 0, fresh: 0, building: 0, solid: 0, safe: 0 };
+  cards.forEach(function (c) {
+    r.total++;
+    if (!c.due) r.fresh++;
+    else if (c.interval < 3) r.building++;
+    else if (c.interval < 21) r.solid++;
+    else r.safe++;
+  });
+  return r;
+}
+
+/** Module, auf die sich die Statistik bezieht (leerer Filter = alle). */
+function filterModules(state, moduleId) {
+  return state.modules.filter(function (m) { return !moduleId || m.id === moduleId; });
+}
+
+/**
+ * Geplante Wiederholungen der nächsten n Tage. Index 0 = heute inklusive
+ * Rückstand und der vor einer Klausur vorgezogenen Karten. Neue Karten zählen nicht.
+ */
+function forecast(state, moduleId, now, n) {
+  const today = todayKey(now);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(0);
+  filterModules(state, moduleId).forEach(function (m) {
+    const ids = moduleSubjectIds(m), d = examDaysLeft(m, now);
+    state.cards.forEach(function (c) {
+      if (!c.due || !ids.has(c.subjectId)) return;
+      const i = Math.max(0, dayDiff(today, effectiveDue(c, m.examDate, d, today)));
+      if (i < n) out[i]++;
+    });
+  });
+  return out;
+}
+
+/**
+ * Schwächen-Übersicht: Auswertung je Thema (Teilfach + Thema-Tag).
+ * rate = Anteil „Nochmal“ an allen Antworten in Prozent (null ohne Lerndaten).
+ * Sortiert nach Schwäche; damit ein Thema mit einer einzigen falschen Antwort
+ * nicht ganz oben landet, wird die Quote für die Reihenfolge geglättet.
+ * Themen ohne Lerndaten stehen am Ende.
+ */
+function topicStats(state, moduleId) {
+  const info = Object.create(null), map = Object.create(null), list = [];
+  filterModules(state, moduleId).forEach(function (m) {
+    m.subjects.forEach(function (s) { info[s.id] = { subject: s, module: m }; });
+  });
+  state.cards.forEach(function (c) {
+    const f = info[c.subjectId];
+    if (!f) return;
+    const key = c.subjectId + '|' + c.topic.toLowerCase();
+    let t = map[key];
+    if (!t) {
+      t = map[key] = {
+        key: key, subjectId: c.subjectId, subjectName: f.subject.name, moduleName: f.module.name,
+        topic: c.topic, total: 0, seen: 0, reviews: 0, lapses: 0, rate: null, score: -1, cardIds: []
+      };
+      list.push(t);
+    }
+    t.total++;
+    t.cardIds.push(c.id);
+    const r = c.reviews || 0;
+    if (r > 0) { t.seen++; t.reviews += r; t.lapses += Math.min(c.lapses || 0, r); }
+  });
+  list.forEach(function (t) {
+    if (!t.reviews) return;
+    t.rate = Math.round(t.lapses / t.reviews * 100);
+    t.score = (t.lapses + 1) / (t.reviews + 6); // geglättet: wenige Antworten zählen weniger
+  });
+  return list.sort(function (a, b) { return b.score - a.score || b.total - a.total; });
+}
+
+/** Schwierige Karten: mindestens zweimal „Nochmal“, die hartnäckigsten zuerst. */
+function hardestCards(state, moduleId) {
+  const ids = new Set();
+  filterModules(state, moduleId).forEach(function (m) {
+    m.subjects.forEach(function (s) { ids.add(s.id); });
+  });
+  return state.cards
+    .filter(function (c) { return ids.has(c.subjectId) && c.lapses >= 2; })
+    .sort(function (a, b) { return b.lapses - a.lapses || a.ef - b.ef; });
 }
 
 function shuffle(arr) {
@@ -458,16 +586,19 @@ function sanitizeState(raw) {
       dropped++; return;
     }
     const due = isDateKey(c.due) ? c.due : null;
+    const reps = due ? intOr(c.reps, 0) : 0, lapses = due ? intOr(c.lapses, 0) : 0;
     cards.push({
       id: freieId(c.id), subjectId: c.subjectId, topic: textField(c.topic),
       question: textField(c.question), answer: textField(c.answer),
       created: typeof c.created === 'string' ? c.created : new Date().toISOString(),
       ef: Number.isFinite(c.ef) ? Math.min(3, Math.max(1.3, c.ef)) : 2.5,
       interval: due ? intOr(c.interval, 0) : 0,
-      reps: due ? intOr(c.reps, 0) : 0,
-      lapses: intOr(c.lapses, 0),
+      reps: reps,
+      lapses: lapses,
       due: due,
-      lastReview: due && isDateKey(c.lastReview) ? c.lastReview : null
+      lastReview: due && isDateKey(c.lastReview) ? c.lastReview : null,
+      // Ältere Daten kennen „reviews“ noch nicht: aus den vorhandenen Zählern schätzen.
+      reviews: due ? Math.max(intOr(c.reviews, reps + lapses), lapses, 1) : 0
     });
   });
 
@@ -478,7 +609,16 @@ function sanitizeState(raw) {
       if (isDateKey(k) && Number.isFinite(n) && n > 0) days[k] = Math.round(n);
     });
   }
-  return { state: { version: 1, modules: modules, cards: cards, stats: { days: days } }, dropped: dropped };
+  const grades = {};
+  if (isObj(raw.stats) && isObj(raw.stats.grades)) {
+    Object.keys(raw.stats.grades).forEach(function (k) {
+      const g = raw.stats.grades[k];
+      if (!isDateKey(k) || !Array.isArray(g) || g.length !== 4) return;
+      const sauber = g.map(function (n) { return intOr(n, 0); });
+      if (sauber[0] + sauber[1] + sauber[2] + sauber[3] > 0) grades[k] = sauber;
+    });
+  }
+  return { state: { version: 1, modules: modules, cards: cards, stats: { days: days, grades: grades } }, dropped: dropped };
 }
 
 /**
@@ -551,6 +691,8 @@ const LernLogik = {
   examDaysLeft: examDaysLeft, sortModulesByExam: sortModulesByExam, maxIntervalForExam: maxIntervalForExam,
   schedule: schedule, effectiveDue: effectiveDue, countCards: countCards, moduleSubjectIds: moduleSubjectIds,
   buildQueue: buildQueue, streak: streak,
+  recordReview: recordReview, activity: activity, hitRate: hitRate, statusCounts: statusCounts,
+  forecast: forecast, topicStats: topicStats, hardestCards: hardestCards,
   parseCardImport: parseCardImport, createBackup: createBackup, parseBackup: parseBackup,
   sanitizeState: sanitizeState, formatText: formatText, escapeHtml: escapeHtml
 };
@@ -598,8 +740,8 @@ const h = escapeHtml;
 const $ = function (sel) { return document.querySelector(sel); };
 
 /** Aktuelle Ansicht, Verlauf für „Zurück“ und laufende Lernsitzung. */
-const ui = { view: { name: 'home', params: {} }, stack: [], session: null, search: '' };
-const TABS = ['home', 'cards', 'settings'];
+const ui = { view: { name: 'home', params: {} }, stack: [], session: null, search: '', statsModule: '', statsAll: false };
+const TABS = ['home', 'cards', 'stats', 'settings'];
 
 /* ---------- Nachschlagen -------------------------------------------------- */
 
@@ -618,6 +760,7 @@ function findSubject(id) {
 /* ---------- Navigation ---------------------------------------------------- */
 
 function go(name, params) {
+  ui.view.scroll = $('#app').scrollTop; // Position merken für „Zurück“
   ui.stack.push(ui.view);
   ui.view = { name: name, params: params || {} };
   render(true);
@@ -626,6 +769,7 @@ function go(name, params) {
 function back() {
   ui.view = ui.stack.pop() || { name: 'home', params: {} };
   render(true);
+  $('#app').scrollTop = ui.view.scroll || 0; // dort weitermachen, wo man war
 }
 
 function switchTab(name) {
@@ -656,7 +800,7 @@ function plural(n, eins, viele) { return n + ' ' + (n === 1 ? eins : viele); }
 
 const VIEWS = {
   home: viewHome, cards: viewCards, subject: viewSubject, edit: viewEdit,
-  study: viewStudy, settings: viewSettings, module: viewModule
+  study: viewStudy, stats: viewStats, settings: viewSettings, module: viewModule
 };
 
 function render(scrollTop) {
@@ -866,8 +1010,12 @@ function startSession(scope, title) {
 
 /** Startet „Freies Üben“: alle Karten eines Teilfachs zufällig, ohne Planung. */
 function startFree(subjectId, title) {
-  const ids = state.cards.filter(function (c) { return c.subjectId === subjectId; }).map(function (c) { return c.id; });
-  if (!ids.length) { toast('In diesem Teilfach gibt es noch keine Karten.'); return; }
+  startFreeCards(state.cards.filter(function (c) { return c.subjectId === subjectId; }).map(function (c) { return c.id; }), title);
+}
+
+/** Freies Üben mit einer beliebigen Kartenauswahl (z. B. ein schwaches Thema). */
+function startFreeCards(ids, title) {
+  if (!ids.length) { toast('Hier gibt es noch keine Karten.'); return; }
   ui.session = { mode: 'free', title: title, queue: shuffle(ids), done: 0, revealed: false, known: 0, unknown: 0 };
   go('study');
 }
@@ -933,7 +1081,7 @@ function rateCurrent(rating) {
     const f = findSubject(c.subjectId);
     const now = new Date(), today = todayKey(now);
     Object.assign(c, schedule(c, rating, today, f ? examDaysLeft(f.module, now) : null));
-    state.stats.days[today] = (state.stats.days[today] || 0) + 1;
+    recordReview(state.stats, today, rating);
     saveState();
     s.counts[rating]++;
     s.done++;
@@ -942,6 +1090,160 @@ function rateCurrent(rating) {
   s.revealed = false;
   s.lockUntil = Date.now() + 350;
   render(true);
+}
+
+/* ---------- Statistik -------------------------------------------------------- */
+
+function statsFilter() { return findModule(ui.statsModule) ? ui.statsModule : ''; }
+
+/** "2026-11-16" → "Mo, 16.11." */
+function shortDate(key) { return formatDate(key).slice(0, -4); }
+
+/**
+ * Säulendiagramm aus HTML-Elementen. Jede Säule ist antippbar und zeigt ihre
+ * Werte in der Zeile unter dem Diagramm; beschriftet ist nur die höchste Säule.
+ * cols: [{label, text, total, mark, segs: [{cls, n}]}] – segs von unten nach oben.
+ */
+function barChart(cols, caption) {
+  const max = Math.max.apply(null, cols.map(function (c) { return c.total; }).concat([1]));
+  let peak = 0;
+  cols.forEach(function (c, i) { if (c.total > cols[peak].total) peak = i; });
+  return '<div class="chart"><div class="chart-cols">' + cols.map(function (c, i) {
+    const hoehe = c.total ? Math.max(4, Math.round(c.total / max * 96)) : 0;
+    const segs = c.segs.filter(function (s) { return s.n > 0; }).map(function (s) {
+      return '<i class="seg ' + s.cls + '" style="flex-grow:' + s.n + '"></i>';
+    }).join('');
+    return '<button class="chart-col' + (c.mark ? ' mark' : '') + '" data-action="chart-pick" data-text="' + h(c.text) + '" aria-label="' + h(c.text) + '">' +
+      '<span class="chart-area">' + (i === peak && c.total ? '<span class="chart-val">' + c.total + '</span>' : '') +
+      '<span class="chart-bar" style="height:' + hoehe + 'px">' + segs + '</span></span>' +
+      '<span class="chart-lab">' + h(c.label) + '</span></button>';
+  }).join('') + '</div><div class="chart-caption">' + h(caption) + '</div></div>';
+}
+
+const STATUS = [
+  { key: 'fresh', name: 'Neu' }, { key: 'building', name: 'Im Aufbau' },
+  { key: 'solid', name: 'Gefestigt' }, { key: 'safe', name: 'Sicher' }
+];
+
+/** Eine Zeile der Lernstand-Übersicht: Name, Zahlen im Klartext, geteilter Balken. */
+function statusRow(name, z) {
+  const text = STATUS.filter(function (s) { return z[s.key]; })
+    .map(function (s) { return z[s.key] + ' ' + s.name.toLowerCase(); }).join(' · ');
+  return '<div class="status-row"><div class="status-head"><span>' + h(name) + '</span><span class="muted small">' + plural(z.total, 'Karte', 'Karten') + '</span></div>' +
+    '<div class="segbar" role="img" aria-label="' + h(text || 'keine Karten') + '">' +
+    STATUS.filter(function (s) { return z[s.key]; }).map(function (s) {
+      return '<i class="st-' + s.key + '" style="flex-grow:' + z[s.key] + '"></i>';
+    }).join('') + '</div><div class="muted small">' + h(text || 'Noch keine Karten') + '</div></div>';
+}
+
+function viewStats() {
+  const now = new Date(), today = todayKey(now);
+  const filter = statsFilter();
+  const module = filterModules(state, filter);
+  const subjectIds = new Set();
+  module.forEach(function (m) { m.subjects.forEach(function (s) { subjectIds.add(s.id); }); });
+  const karten = state.cards.filter(function (c) { return subjectIds.has(c.subjectId); });
+
+  /* --- Aktivität (alle Module) --- */
+  const tage = activity(state.stats, today, 14);
+  const quote = hitRate(state.stats, today, 7);
+  const serie = streak(state.stats.days, today);
+  const gesamt = Object.keys(state.stats.days).reduce(function (sum, k) { return sum + state.stats.days[k]; }, 0);
+  function tagText(d) {
+    if (!d.total) return shortDate(d.date) + ': nichts gelernt';
+    return shortDate(d.date) + ': ' + plural(d.total, 'Antwort', 'Antworten') +
+      (d.again + d.known ? ', davon ' + d.again + '× „Nochmal“' : '');
+  }
+  const ohneDetail = tage.some(function (d) { return d.other > 0; });
+  const aktivitaet = '<div class="group-title">Aktivität · alle Module</div>' +
+    '<section class="tiles"><div><b>' + (state.stats.days[today] || 0) + '</b><span>heute gelernt</span></div>' +
+    '<div><b>' + serie + '</b><span>' + (serie === 1 ? 'Tag Lernserie' : 'Tage Lernserie') + '</span></div>' +
+    '<div><b>' + (quote === null ? '–' : quote + ' %') + '</b><span>gewusst, letzte 7 Tage</span></div>' +
+    '<div><b>' + gesamt + '</b><span>Antworten insgesamt</span></div></section>' +
+    '<section class="card"><h2 class="card-title">Antworten der letzten 14 Tage</h2>' +
+    '<div class="legend"><span><i class="sw seg-known"></i>Gewusst</span><span><i class="sw seg-again"></i>Nochmal</span>' +
+    (ohneDetail ? '<span><i class="sw seg-other"></i>ohne Aufschlüsselung</span>' : '') + '</div>' +
+    barChart(tage.map(function (d) {
+      return {
+        label: d.date.slice(8), text: tagText(d), total: d.total, mark: d.date === today,
+        segs: [{ cls: 'seg-known', n: d.known }, { cls: 'seg-other', n: d.other }, { cls: 'seg-again', n: d.again }]
+      };
+    }), tagText(tage[tage.length - 1])) + '</section>';
+
+  /* --- Filter --- */
+  const chips = '<div class="chips"><button class="chip' + (filter ? '' : ' on') + '" data-action="stats-filter" data-id="">Alle Module</button>' +
+    state.modules.map(function (m) {
+      return '<button class="chip' + (filter === m.id ? ' on' : '') + '" data-action="stats-filter" data-id="' + h(m.id) + '">' + h(m.code || m.name) + '</button>';
+    }).join('') + '</div>';
+
+  /* --- Lernstand: je Modul bzw. je Teilfach des gewählten Moduls --- */
+  const alle = statusCounts(karten);
+  let zeilen;
+  if (filter) {
+    zeilen = module[0].subjects.map(function (s) {
+      return statusRow(s.name, statusCounts(karten.filter(function (c) { return c.subjectId === s.id; })));
+    }).join('');
+  } else {
+    zeilen = module.map(function (m) {
+      const ids = moduleSubjectIds(m);
+      return statusRow(m.name, statusCounts(karten.filter(function (c) { return ids.has(c.subjectId); })));
+    }).join('');
+  }
+  const lernstand = '<section class="card"><h2 class="card-title">Lernstand</h2>' +
+    '<div class="legend">' + STATUS.map(function (s) {
+      return '<span><i class="sw st-' + s.key + '"></i>' + s.name + ' <b>' + alle[s.key] + '</b></span>';
+    }).join('') + '</div>' + (zeilen || '<p class="muted small">Keine Teilfächer.</p>') +
+    '<p class="muted small">Im Aufbau: Abstand unter 3 Tagen · Gefestigt: 3 bis 20 Tage · Sicher: ab 21 Tagen</p></section>';
+
+  /* --- Ausblick --- */
+  const plan = forecast(state, filter, now, 7);
+  function planText(n, i) {
+    return i === 0 ? 'Heute: ' + plural(n, 'Karte', 'Karten') + ' fällig'
+      : shortDate(addDays(today, i)) + ': ' + plural(n, 'Wiederholung', 'Wiederholungen') + ' geplant';
+  }
+  const ausblick = '<section class="card"><h2 class="card-title">Geplante Wiederholungen, nächste 7 Tage</h2>' +
+    barChart(plan.map(function (n, i) {
+      return {
+        label: i === 0 ? 'Heute' : WOCHENTAGE[new Date(keyToUTC(addDays(today, i))).getUTCDay()],
+        text: planText(n, i), total: n, mark: i === 0, segs: [{ cls: 'seg-known', n: n }]
+      };
+    }), planText(plan[0], 0)) +
+    '<p class="muted small">Stand heute, ohne die ' + plural(alle.fresh, 'neue Karte', 'neuen Karten') + '. Jede Bewertung verschiebt die Planung.</p></section>';
+
+  /* --- Schwächen je Thema --- */
+  const themen = topicStats(state, filter);
+  const mitDaten = themen.filter(function (t) { return t.reviews > 0; });
+  const sichtbar = ui.statsAll ? mitDaten : mitDaten.slice(0, 6);
+  let schwaechen;
+  if (!mitDaten.length) {
+    schwaechen = '<p class="muted">Noch keine Lerndaten. Sobald du Karten bewertest, stehen hier die Themen, die am schlechtesten sitzen.</p>';
+  } else {
+    schwaechen = '<p class="muted small">Anteil „Nochmal“ an allen Antworten je Thema. Oben stehen die Themen, die am schlechtesten sitzen.</p>' +
+      sichtbar.map(function (t) {
+        return '<div class="topic"><div class="topic-head"><span class="topic-name">' + h(t.topic || 'Ohne Thema') + '</span><span class="topic-rate">' + t.rate + ' %</span></div>' +
+          '<div class="muted small">' + h(t.subjectName) + ' · ' + t.seen + ' von ' + plural(t.total, 'Karte', 'Karten') + ' gelernt · ' +
+          t.lapses + ' von ' + plural(t.reviews, 'Antwort', 'Antworten') + ' „Nochmal“</div>' +
+          '<div class="topic-row"><div class="meter"><i style="width:' + t.rate + '%"></i></div>' +
+          '<button class="btn slim" data-action="practice-topic" data-key="' + h(t.key) + '">Üben</button></div></div>';
+      }).join('') +
+      (mitDaten.length > 6 ? '<button class="btn" data-action="stats-all">' + (ui.statsAll ? 'Weniger anzeigen' : 'Alle ' + mitDaten.length + ' Themen anzeigen') + '</button>' : '') +
+      (themen.length > mitDaten.length ? '<p class="muted small">' + plural(themen.length - mitDaten.length, 'weiteres Thema', 'weitere Themen') + ' noch ohne Lerndaten.</p>' : '');
+  }
+
+  /* --- Schwierigste Karten --- */
+  const harte = hardestCards(state, filter);
+  const harteListe = harte.length
+    ? '<section class="card list">' + harte.slice(0, 5).map(function (c) {
+      const f = findSubject(c.subjectId);
+      return '<button class="row" data-action="edit-card" data-id="' + h(c.id) + '"><span class="row-main"><span class="row-title clamp">' + h(c.question) + '</span>' +
+        '<span class="muted small">' + c.lapses + '× Nochmal · ' + h((f ? f.subject.name : '') + (c.topic ? ' · ' + c.topic : '')) + '</span></span><span class="chev">›</span></button>';
+    }).join('') + '</section><button class="btn" data-action="practice-hard"><span>Schwierige Karten üben</span><small>' +
+      plural(harte.length, 'Karte', 'Karten') + ' mit mindestens 2× „Nochmal“ · ohne Einfluss auf die Planung</small></button>'
+    : '<p class="muted small">Noch keine Karte wurde mindestens zweimal mit „Nochmal“ bewertet.</p>';
+
+  return topbar('Statistik') + '<div class="content">' + aktivitaet + chips + lernstand + ausblick +
+    '<div class="group-title">Schwächen nach Thema</div><section class="card topics">' + schwaechen + '</section>' +
+    '<div class="group-title">Schwierigste Karten</div>' + harteListe + '</div>';
 }
 
 /* ---------- Einstellungen --------------------------------------------------- */
@@ -1152,6 +1454,23 @@ const actions = {
     render(true);
   },
 
+  'stats-filter': function (el) { ui.statsModule = el.dataset.id; ui.statsAll = false; render(false); },
+  'stats-all': function () { ui.statsAll = !ui.statsAll; render(false); },
+  /** Angetippte Säule: Werte unter dem Diagramm anzeigen. */
+  'chart-pick': function (el) {
+    const chart = el.closest('.chart');
+    chart.querySelectorAll('.chart-col.sel').forEach(function (c) { c.classList.remove('sel'); });
+    el.classList.add('sel');
+    chart.querySelector('.chart-caption').textContent = el.dataset.text;
+  },
+  'practice-topic': function (el) {
+    const t = topicStats(state, statsFilter()).find(function (x) { return x.key === el.dataset.key; });
+    if (t) startFreeCards(t.cardIds, (t.topic || 'Ohne Thema') + ' · ' + t.subjectName);
+  },
+  'practice-hard': function () {
+    startFreeCards(hardestCards(state, statsFilter()).map(function (c) { return c.id; }), 'Schwierige Karten');
+  },
+
   'open-subject': function (el) { ui.search = ''; go('subject', { subjectId: el.dataset.id }); },
   'new-card': function () { go('edit', { subjectId: ui.view.params.subjectId }); },
   'edit-card': function (el) { go('edit', { cardId: el.dataset.id }); },
@@ -1234,7 +1553,7 @@ const actions = {
     state.cards.forEach(function (c) {
       if (ziel === '*' || c.subjectId === ziel) { Object.assign(c, newLearnState()); n++; }
     });
-    if (ziel === '*') state.stats = { days: {} };
+    if (ziel === '*') state.stats = { days: {}, grades: {} };
     saveState(); render(false);
     toast('Lernstand von ' + plural(n, 'Karte', 'Karten') + ' zurückgesetzt.');
   }

@@ -340,3 +340,90 @@ label.inline .input { width: 90px; }
   font-size: 15px; text-align: center;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
+
+/* ---------- Statistik ----------------------------------------------------- */
+
+:root {
+  /* Diagrammfarben: Blau = gewusst/geplant, Orange = „Nochmal“ */
+  --viz-known: #3987e5;
+  --viz-again: #d95926;
+  --viz-other: #4a5162;
+  /* Lernstand: ein Farbton, von dunkel (neu) nach hell (sicher) */
+  --viz-st1: #184f95;
+  --viz-st2: #2a78d6;
+  --viz-st3: #6da7ec;
+  --viz-st4: #b7d3f6;
+}
+
+.card-title { font-size: 15px; font-weight: 650; margin-bottom: 10px; }
+
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tiles > div { background: var(--surface); border-radius: var(--radius); padding: 12px 14px; }
+.tiles b { display: block; font-size: 24px; font-weight: 700; }
+.tiles span { color: var(--muted); font-size: 13px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-bottom: 12px; color: var(--muted); font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend b { color: var(--text); font-weight: 600; }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+.seg-known { background: var(--viz-known); }
+.seg-again { background: var(--viz-again); }
+.seg-other { background: var(--viz-other); }
+.st-fresh { background: var(--viz-st1); }
+.st-building { background: var(--viz-st2); }
+.st-solid { background: var(--viz-st3); }
+.st-safe { background: var(--viz-st4); }
+
+/* Säulendiagramm */
+.chart-cols { display: flex; align-items: stretch; gap: 2px; }
+.chart-col {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 0; border: 0; border-radius: 6px; background: transparent;
+}
+.chart-area {
+  width: 100%; height: 116px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  border-bottom: 1px solid var(--line);
+}
+.chart-val { color: var(--muted); font-size: 11px; line-height: 1; margin-bottom: 4px; }
+.chart-bar {
+  width: 70%; max-width: 24px;
+  display: flex; flex-direction: column-reverse; gap: 2px;
+}
+.chart-bar .seg { display: block; flex: 1 1 0; min-height: 1px; }
+.chart-bar .seg:last-child { border-radius: 4px 4px 0 0; }
+.chart-lab { padding: 6px 0 4px; color: var(--muted); font-size: 11px; line-height: 1; }
+.chart-col.mark .chart-lab { color: var(--text); font-weight: 700; }
+.chart-col.sel { background: var(--surface-2); }
+.chart-caption { margin-top: 8px; color: var(--text); font-size: 14px; min-height: 20px; }
+.chart + .small { margin-top: 6px; }
+
+/* Lernstand: schmaler geteilter Balken je Zeile */
+.status-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.status-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; font-weight: 500; }
+.status-head .small { flex: none; font-weight: 400; }
+.segbar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-2); }
+.segbar i { display: block; flex: 1 1 0; min-width: 3px; }
+
+/* Modulfilter */
+.chips { display: flex; gap: 8px; overflow-x: auto; margin: 4px -16px 0; padding: 2px 16px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: none; min-height: 40px; padding: 8px 14px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: transparent; color: var(--muted);
+  font-size: 14px; font-weight: 600; white-space: nowrap;
+}
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* Schwächen je Thema */
+.topics { display: flex; flex-direction: column; gap: 14px; }
+.topic { display: flex; flex-direction: column; gap: 4px; padding-top: 14px; border-top: 1px solid var(--line); }
+.topic-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.topic-name { font-weight: 600; overflow-wrap: anywhere; }
+.topic-rate { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.topic-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.meter { flex: 1; height: 8px; border-radius: 4px; background: rgba(217, 89, 38, 0.2); overflow: hidden; }
+.meter i { display: block; height: 100%; border-radius: 4px; background: var(--viz-again); }
