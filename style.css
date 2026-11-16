@@ -38,6 +38,11 @@ html, body {
 }
 
 body {
+  /* Fest am Bildschirm verankert. Im iPhone-Vollbild setzt app.js zusätzlich
+     die echte Bildschirmhöhe (siehe fitStandaloneHeight), weil 100dvh dort um
+     die Höhe der Statusleiste zu kurz ist und unten ein Streifen frei bliebe. */
+  position: fixed;
+  top: 0; left: 0; right: 0;
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -103,7 +108,8 @@ body.no-tabs .content { padding-bottom: calc(28px + var(--safe-bottom)); }
 
 #tabbar {
   display: flex;
-  padding: 6px calc(8px + var(--safe-right)) calc(6px + var(--safe-bottom)) calc(8px + var(--safe-left));
+  /* Unten nur so viel Abstand, dass der Home-Indikator frei bleibt */
+  padding: 4px calc(8px + var(--safe-right)) max(4px, calc(var(--safe-bottom) - 12px)) calc(8px + var(--safe-left));
   background: var(--surface);
   border-top: 1px solid var(--line);
 }
@@ -111,8 +117,8 @@ body.no-tabs #tabbar { display: none; }
 #tabbar button {
   flex: 1;
   display: flex; flex-direction: column; align-items: center; gap: 2px;
-  min-height: 50px;
-  padding: 6px 0;
+  min-height: 48px;
+  padding: 4px 0 2px;
   border: 0; background: transparent;
   color: var(--muted);
   font-size: 11px;
@@ -308,7 +314,7 @@ label.inline .input { width: 90px; }
 /* ---------- Dialog und Hinweis -------------------------------------------- */
 
 #dialog {
-  position: fixed; inset: 0; z-index: 20;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 20;
   display: flex; align-items: center; justify-content: center;
   padding: calc(20px + var(--safe-top)) 20px calc(20px + var(--safe-bottom));
   background: rgba(0, 0, 0, 0.6);
@@ -329,9 +335,9 @@ label.inline .input { width: 90px; }
 .errors li { margin: 4px 0; }
 
 #toast {
-  position: fixed; z-index: 30;
+  position: absolute; z-index: 30;
   left: 16px; right: 16px;
-  bottom: calc(84px + var(--safe-bottom));
+  bottom: calc(76px + var(--safe-bottom));
   max-width: 420px; margin: 0 auto;
   padding: 12px 16px;
   border-radius: 14px;

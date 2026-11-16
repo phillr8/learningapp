@@ -1630,9 +1630,30 @@ function onInput(e) {
 
 /* ---------- Start ----------------------------------------------------------- */
 
+/**
+ * iPhone-Vollbild (vom Home-Bildschirm gestartet): Dort meldet iOS mit
+ * durchscheinender Statusleiste eine zu kleine Höhe, unten bliebe ein leerer
+ * Streifen. Die App füllt in diesem Modus immer den ganzen Bildschirm, also
+ * wird die Höhe direkt aus der Bildschirmgröße gesetzt.
+ */
+function fitStandaloneHeight() {
+  if (!navigator.standalone) return; // nur iOS-Vollbild; im Browser regelt es das CSS
+  const kurz = Math.min(screen.width, screen.height), lang = Math.max(screen.width, screen.height);
+  const breite = window.innerWidth;
+  // Hochformat: Breite = kurze Seite. Passt keine Seite (z. B. geteilter
+  // Bildschirm auf dem iPad), bleibt es bei der Höhe aus dem CSS.
+  const hoehe = breite === kurz ? lang : breite === lang ? kurz : 0;
+  const wert = hoehe ? hoehe + 'px' : '';
+  document.documentElement.style.height = wert;
+  document.body.style.height = wert;
+}
+
 function init() {
   const geladen = loadState();
   state = geladen.state;
+  fitStandaloneHeight();
+  window.addEventListener('resize', fitStandaloneHeight);
+  window.addEventListener('orientationchange', function () { setTimeout(fitStandaloneHeight, 300); });
   document.addEventListener('click', onClick);
   document.addEventListener('change', onChange);
   document.addEventListener('input', onInput);
